@@ -64,9 +64,15 @@ def main(args):
         df_feature_names.append(col)
         predicates.append(col.replace(' ','_').lower())
 
+    # Head mode declarations
+    mode_declarations = ['#maxv({0}).'.format(maxv)]
+    if not multi_class:
+        mode_declarations.append('#modeh(accept).')
+    else:
+        mode_declarations.append('#modeh(class(const(class))).')
+
     # Construct constants and body mode declarations
     constants = []
-    mode_declarations = ['#maxv({0}).'.format(maxv)]
     for p_idx, p in enumerate(predicates):
         mode_declarations.append('#modeb(1, {0}(const({0}))).'.format(p))
         unique_values = features[df_feature_names[p_idx]].unique()
@@ -106,10 +112,19 @@ def main(args):
     else:
         def construct_multi_class_example(row, row_idx, positive):
             class_id = labels[row_idx]
+
+            # Build non classes for exclusion set
+            non_label_mask = labels != class_id
+            non_class_ids = labels[non_label_mask]
+            non_class_str = ''
+            for ncid in non_class_ids:
+                non_class_str += 'class({0}), '.format(ncid)
+            non_class_str = non_class_str[:-2]
+
             if positive:
-                ex = '#pos(eg(id{0}), {{ class({1}) }}, {{ }}, {{\n'.format(row_idx, class_id)
+                ex = '#pos(eg(id{0}), {{ class({1}) }}, {{ {2} }}, {{\n'.format(row_idx, class_id, non_class_str)
             else:
-                ex = '#pos(eg(id{0}), {{ }}, {{ class({1}) }}, {{\n'.format(row_idx, class_id)
+                ex = '#pos(eg(id{0}), {{ {2} }}, {{ class({1}) }}, {{\n'.format(row_idx, class_id, non_class_str)
 
             ex += construct_inner(row)
 
@@ -117,12 +132,6 @@ def main(args):
             return ex
 
         examples = [construct_multi_class_example(row, idx, True) for idx, row in enumerate(features[df_feature_names].values)]
-
-    # Head mode declarations
-    # TODO multi class
-    if not multi_class:
-        mode_declarations.append('#modeh(accept).')
-
 
     # Scoring Function
     # Length function specified here
