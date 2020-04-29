@@ -110,12 +110,13 @@ def main(args):
 
         examples = positive_examples + negative_examples
     else:
+        unique_labels = np.unique(labels)
         def construct_multi_class_example(row, row_idx, positive):
             class_id = labels[row_idx]
 
             # Build non classes for exclusion set
-            non_label_mask = labels != class_id
-            non_class_ids = labels[non_label_mask]
+            non_label_mask = unique_labels != class_id
+            non_class_ids = unique_labels[non_label_mask]
             non_class_str = ''
             for ncid in non_class_ids:
                 non_class_str += 'class({0}), '.format(ncid)
