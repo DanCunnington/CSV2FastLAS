@@ -1,6 +1,6 @@
-from sklearn.preprocessing import LabelEncoder
 import sys
 import ast
+import math
 import argparse
 import pandas as pd
 import numpy as np
@@ -12,6 +12,7 @@ def main(args):
     sf_name = args.scoring_function
     predictor_pos_value = args.predictor_positive_value
     maxv = args.maxv
+    noise = args.noise
 
     # Validate columns
     if columns != '*':
@@ -27,8 +28,11 @@ def main(args):
     # Load file
     csv_file = pd.read_csv(csv_file_path)
 
-    # Transform dataframe to lower case
+    # Transform strings to lower case
     csv_file = csv_file.applymap(lambda s:s.lower() if type(s) == str else s)
+
+    # Transform floats to integers
+    csv_file = csv_file.applymap(lambda f:math.floor(f*100000) if type(f) == float else f)
 
     # Extract features and predictor
     if columns == '*':
@@ -42,18 +46,13 @@ def main(args):
     if len(labels.unique()) > 2:
         multi_class = True
 
-    # Label encode predictor for multi class
-    if multi_class:
-        le = LabelEncoder()
-        labels = le.fit_transform(labels)
-        classes = le.classes_
-        print('Multi Class Classification. Using the following labels for the predictor:', file=sys.stderr)
-        print('---', file=sys.stderr)
-        for idx, c in enumerate(classes):
-            print('Class: {0}, Label: {1}'.format(c,idx), file=sys.stderr)
+    # Setup arrays
+    background_knowledge = []
+    scoring_function = []
+    constants = []
+    mode_declarations = ['#maxv({0}).'.format(maxv)]
 
     # Background Knowledge
-    background_knowledge = []
     if multi_class:
         background_knowledge.append(':- class(X), class(Y), X < Y.')
 
@@ -65,14 +64,12 @@ def main(args):
         predicates.append(col.replace(' ','_').lower())
 
     # Head mode declarations
-    mode_declarations = ['#maxv({0}).'.format(maxv)]
     if not multi_class:
-        mode_declarations.append('#modeh(accept).')
+        mode_declarations.append('#modeh({0}).'.format(predictor_pos_value))
     else:
         mode_declarations.append('#modeh(class(const(class))).')
 
     # Construct constants and body mode declarations
-    constants = []
     for p_idx, p in enumerate(predicates):
         mode_declarations.append('#modeb(1, {0}(const({0}))).'.format(p))
         unique_values = features[df_feature_names[p_idx]].unique()
@@ -89,6 +86,17 @@ def main(args):
                 ex_str_inner += '\t{0}({1}).\n'.format(p, row[p_idx])
             return ex_str_inner
 
+    # Coverage scoring function additions
+    def add_to_cov_sf(row, row_idx):
+        scoring_function.append('#bias("pos_example(eg(id{0})) :- not n(eg(id{0})).").'.format(row_idx))
+        for p_idx, p in enumerate(predicates):
+            scoring_function.append('#bias("n(eg(id{0})) :- in_body({1}(V)), V != {2}.").'.format(row_idx, p, row[p_idx]))
+
+    def add_to_cov_sf_multi_class(row, row_idx, class_id):
+        scoring_function.append('#bias("pos_example(eg(id{0})) :- in_head(class({1})), not n(eg(id{0})).").'.format(row_idx, class_id))
+        for p_idx, p in enumerate(predicates):
+            scoring_function.append('#bias("n(eg(id{0})) :- in_body({1}(V)), V != {2}.").'.format(row_idx, p, row[p_idx]))
+
     if not multi_class:
         mask = labels == str(predictor_pos_value)
         positive_ex_features = features[mask]
@@ -96,17 +104,21 @@ def main(args):
 
         def construct_example(row, row_idx, positive):
             if positive:
-                ex = '#pos(eg(id{0}), {{ accept }}, {{ }}, {{\n'.format(row_idx)
+                ex = '#pos(eg(id{0})@{1}, {{ {2} }}, {{ }}, {{\n'.format(row_idx, noise, predictor_pos_value)
             else:
-                ex = '#pos(eg(id{0}), {{ }}, {{ accept }}, {{\n'.format(row_idx)
+                ex = '#pos(eg(id{0})@{1}, {{ }}, {{ {2} }}, {{\n'.format(row_idx, noise, predictor_pos_value)
 
             ex += construct_inner(row)
 
             ex += f'}}).'
+
+            if sf_name == 'cov' and positive:
+                add_to_cov_sf(row, row_idx)
             return ex
         
         positive_examples = [construct_example(row, idx, True) for idx, row in enumerate(positive_ex_features[df_feature_names].values)]
-        negative_examples = [construct_example(row, idx, False) for idx, row in enumerate(negative_ex_features[df_feature_names].values)]
+        amount_neg_examples = len(positive_ex_features[df_feature_names].values)
+        negative_examples = [construct_example(row, idx+amount_neg_examples, False) for idx, row in enumerate(negative_ex_features[df_feature_names].values)]
 
         examples = positive_examples + negative_examples
     else:
@@ -123,13 +135,17 @@ def main(args):
             non_class_str = non_class_str[:-2]
 
             if positive:
-                ex = '#pos(eg(id{0}), {{ class({1}) }}, {{ {2} }}, {{\n'.format(row_idx, class_id, non_class_str)
+                ex = '#pos(eg(id{0})@{1}, {{ class({2}) }}, {{ {3} }}, {{\n'.format(row_idx, noise, class_id, non_class_str)
             else:
-                ex = '#pos(eg(id{0}), {{ {2} }}, {{ class({1}) }}, {{\n'.format(row_idx, class_id, non_class_str)
+                ex = '#pos(eg(id{0})@{1}, {{ {3} }}, {{ class({2}) }}, {{\n'.format(row_idx, noise, class_id, non_class_str)
 
             ex += construct_inner(row)
 
             ex += f'}}).'
+
+            if sf_name == 'cov' and positive:
+                add_to_cov_sf_multi_class(row, row_idx, class_id)
+
             return ex
 
         examples = [construct_multi_class_example(row, idx, True) for idx, row in enumerate(features[df_feature_names].values)]
@@ -137,10 +153,13 @@ def main(args):
     # Scoring Function
     # Length function specified here
     # TODO others
-    scoring_function = []
     if sf_name == 'len':
         scoring_function.append('#bias("penalty(1, head(X)) :- in_head(X).").')
         scoring_function.append('#bias("penalty(1, body(X)) :- in_body(X).").')
+    elif sf_name == 'cov':
+        scoring_function.append('#bias("penalty(1,ID) :- pos_example(ID).").')
+        scoring_function.append('#bias(":- not penalty(1, _).").')
+        scoring_function.append('#bias("invert(1000).").')
 
 
     # Print to std out
@@ -182,6 +201,7 @@ if __name__ == '__main__':
     parser.add_argument('--scoring_function', help='The scoring function to use (default: len).', default='len')
     parser.add_argument('--maxv', help='The maximum number of variables '\
         'to allow in the body of learned rules (default: 1).', default=1)
+    parser.add_argument('--noise', help='The noise weight for each example (default: 1000).', default=1000)
     
     args = parser.parse_args()
     main(args)
