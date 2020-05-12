@@ -5,7 +5,6 @@ import numpy as np
 import sys
 
 # Take in three learned hypothesis files, test examples and calculate combination policy results
-
 def build_rules(hyp):
     # Build rules
     rules = {}
@@ -57,78 +56,19 @@ def predict(example, hyp_rules_for_class):
         # print('Warning, no prediction made by site.')
         return None
     else:
-        print('Warning - multiple final predictions')
-        print(rule_results)
-        print(final_pred)
+        #print('Warning - multiple final predictions')
+        #print(rule_results)
+        #print(final_pred)
         return None
 
-
-def policy_prediction(pred_a, pred_b, pred_c, test_examples_type, classes):
-    one_h_pred_a = {}
-    one_h_pred_b = {}
-    one_h_pred_c = {}
-    for cl in classes:
-        one_h_pred_a[cl] = 0
-        one_h_pred_b[cl] = 0
-        one_h_pred_c[cl] = 0
-
-    if pred_a:
-        one_h_pred_a[pred_a] = 1
-    if pred_b:
-        one_h_pred_b[pred_b] = 1
-    if pred_c:
-        one_h_pred_c[pred_c] = 1
-
-    one_h_pred_a = np.array([one_h_pred_a[p] == 1 for p in one_h_pred_a])
-    one_h_pred_b = np.array([one_h_pred_b[p] == 1 for p in one_h_pred_b])
-    one_h_pred_c = np.array([one_h_pred_c[p] == 1 for p in one_h_pred_c])
-
-    d1_frac_icmp = 0.96
-    d1_frac_tcp = 0
-    d1_frac_udp = 0.04
-
-    d2_frac_icmp = 0
-    d2_frac_tcp = 1
-    d2_frac_udp = 0
-
-    d3_frac_icmp = 0
-    d3_frac_tcp = 0.04
-    d3_frac_udp = 0.96
-
-    if test_examples_type == 'icmp':
-        frac_a = d1_frac_icmp
-        frac_b = d2_frac_icmp
-        frac_c = d3_frac_icmp
-    elif test_examples_type == 'tcp':
-        frac_a = d1_frac_tcp
-        frac_b = d2_frac_tcp
-        frac_c = d3_frac_tcp
-    elif test_examples_type == 'udp':
-        frac_a = d1_frac_udp
-        frac_b = d2_frac_udp
-        frac_c = d3_frac_udp
-
-    policy_preds = (frac_a*one_h_pred_a + frac_b*one_h_pred_b + frac_c*one_h_pred_c) / (frac_a + frac_b + frac_c)
-    if any(policy_preds):
-        return classes[np.argmax(policy_preds)]
-    else:
-        #print('No prediction made by any model')
-        return None
 
 def main(args):
-    learned_hyp_file_1_path = args.learned_hyp_file_1
-    learned_hyp_file_2_path = args.learned_hyp_file_2
-    learned_hyp_file_3_path = args.learned_hyp_file_3
+    learned_hyp_file_path = args.learned_hyp_file
     test_examples_path = args.test_examples
-    test_examples_type = args.test_examples_type
     classes = ast.literal_eval(args.classes)
 
-
-    learned_hyp_file_1 = open(learned_hyp_file_1_path, "r").read()
-    learned_hyp_file_2 = open(learned_hyp_file_2_path, "r").read()
-    learned_hyp_file_3 = open(learned_hyp_file_3_path, "r").read()
+    learned_hyp_file = open(learned_hyp_file_path, "r").read()
     test_examples_file = open(test_examples_path, "r").read().split("% Background Knowledge")[0].split("% Examples")[1]
-
 
     # Extract examples using RegEX - Note. Binary classification only
     r_str = '(#pos\(.*, {)(((\s*)+[^\)|\}]+\)\.)+)'
@@ -155,9 +95,7 @@ def main(args):
         else:
             examples[class_str] = [example]
 
-    hyp_1_rules = build_rules(learned_hyp_file_1)
-    hyp_2_rules = build_rules(learned_hyp_file_2)
-    hyp_3_rules = build_rules(learned_hyp_file_3)
+    hyp_rules = build_rules(learned_hyp_file)
 
     class_predictions = {}
     none_class_predictions = {}
@@ -169,13 +107,9 @@ def main(args):
         class_predictions[class_str_gt] = []
         none_class_predictions[class_str_gt] = 0
         for ex in examples[class_str_gt]:
-            pred_1 = predict(ex, hyp_1_rules)
-            pred_2 = predict(ex, hyp_2_rules)
-            pred_3 = predict(ex, hyp_3_rules)
-            policy_pred = policy_prediction(pred_1, pred_2, pred_3, test_examples_type, classes)
-
-            if policy_pred:
-                class_predictions[class_str_gt].append(policy_pred)
+            pred = predict(ex, hyp_rules)
+            if pred:
+                class_predictions[class_str_gt].append(pred)
             else:
                 none_class_predictions[class_str_gt] += 1
 
@@ -188,24 +122,6 @@ def main(args):
         n_pred_for += n_pred
         n_skipped += none_class_predictions[class_str_gt]
 
-        benign_tmp = [p for p in class_predictions[class_str_gt] if p == 'class(benign)']
-        dos_tmp = [p for p in class_predictions[class_str_gt] if p == 'class(dos)']
-        probe_tmp = [p for p in class_predictions[class_str_gt] if p == 'class(probe)']
-        r2l_tmp = [p for p in class_predictions[class_str_gt] if p == 'class(r2l)']
-        u2r_tmp = [p for p in class_predictions[class_str_gt] if p == 'class(u2r)']
-
-        print('Predictions for: ',class_str_gt)
-        print('pred benign: ',len(benign_tmp))
-        print('pred dos: ',len(dos_tmp))
-        print('pred probe: ',len(probe_tmp))
-        print('pred r2l: ',len(r2l_tmp))
-        print('pred u2r: ',len(u2r_tmp))
-        print('pred none: ', none_class_predictions[class_str_gt])
-        print(n_pred + none_class_predictions[class_str_gt])
-        print('%%%%%%%%%%%%%%%%%%%%%')
-
-        
-
     print('Final results')
     print('Number of Test Examples: ', n_total)
     print('Number of None predictions: ', n_skipped)
@@ -214,12 +130,8 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Policy Based Ensembles FastLAS score')
-    parser.add_argument('learned_hyp_file_1', help='The learned hypothesis file 1 to score against')
-    parser.add_argument('learned_hyp_file_2', help='The learned hypothesis file 2 to score against')
-    parser.add_argument('learned_hyp_file_3', help='The learned hypothesis file 3 to score against')
-
+    parser.add_argument('learned_hyp_file', help='The learned hypothesis file to score against')
     parser.add_argument('test_examples', help='The .las file containing the test examples')
-    parser.add_argument('test_examples_type', help='The type of the test examples (icmp, tcp, udp).')
     parser.add_argument('--classes', help='The list of classes to use. Default: "[\'class(benign)\',\'class(dos)\',\'class(probe)\',\'class(u2r)\',\'class(r2l)\']"', 
         default="['class(benign)','class(dos)','class(probe)','class(u2r)','class(r2l)']")
     
