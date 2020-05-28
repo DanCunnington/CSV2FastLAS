@@ -198,7 +198,7 @@ if __name__ == '__main__':
     parser.add_argument('--predictor_positive_value', 
         help='The value of the predictor for a positive class in binary classification (default: accept).',
         default='accept')
-    parser.add_argument('--scoring_function', help='The scoring function to use (default: len).', default='len')
+    parser.add_argument('--scoring_function', help='The scoring function to use, len or cov (default: len).', default='len')
     parser.add_argument('--maxv', help='The maximum number of variables '\
         'to allow in the body of learned rules (default: 1).', default=1)
     parser.add_argument('--noise', help='The noise weight for each example (default: 1000).', default=1000)
